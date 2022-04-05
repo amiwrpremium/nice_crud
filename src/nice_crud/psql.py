@@ -27,13 +27,16 @@ class PostgresCrud:
     __INDEX_TYPES = ['btree', 'hash', 'gist', 'gin', 'spgist', 'brin', 'b-tree', 'sp-gist']
 
     def __init__(
-            self, dbname: str, user: str, password: str, host: str, port: int
+            self, dbname: str, user: str, password: str, host: str, port: int, close_conn: bool = False
     ):
         self._dbname = dbname
         self._user = user
         self._password = password
         self._host = host
         self._port = port
+
+        self._conn = None
+        self._close_conn = close_conn
 
     def _db_data_to_dict(self) -> t.Dict:
         return {
@@ -45,31 +48,37 @@ class PostgresCrud:
         }
 
     def _connect(self):
-        try:
-            conn = psycopg2.connect(
-                dbname=self._dbname,
-                user=self._user,
-                password=self._password,
-                host=self._host,
-                port=self._port
-            )
-            return conn
-        except Exception as e:
-            raise exceptions.ConnectionException(
-                func_name='connect', message=f'Connection Error: {e}', db_data=self._db_data_to_dict()
-            )
+        if self._conn is None:
+            try:
+                self._conn = psycopg2.connect(
+                    dbname=self._dbname,
+                    user=self._user,
+                    password=self._password,
+                    host=self._host,
+                    port=self._port
+                )
+                return self._conn
+            except Exception as e:
+                raise exceptions.ConnectionException(
+                    func_name='connect', message=f'Connection Error: {e}', db_data=self._db_data_to_dict()
+                )
 
-    def _close(self, conn):
-        try:
-            conn.close()
-        except Exception as e:
-            raise exceptions.ConnectionException(
-                func_name='close', message=f'Connection Error: {e}', db_data=self._db_data_to_dict()
-            )
+        return self._conn
+
+    def _close(self):
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception as e:
+                raise exceptions.ConnectionException(
+                    func_name='close', message=f'Connection Error: {e}', db_data=self._db_data_to_dict()
+                )
+        return True
 
     def _execute(self, func_name: str, sql: str, type_: str, func_params, **kwargs):
         __locals__ = locals()
         __locals__.pop('self')
+
         conn = self._connect()
         cur = conn.cursor()
 
@@ -98,8 +107,10 @@ class PostgresCrud:
                 raise exceptions.WrongTypeException(
                     func_name=func_name, message=f'Unknown type: {type_}', sql=sql,
                 )
+
         finally:
-            self._close(conn)
+            if self._close_conn:
+                self._close()
 
     @staticmethod
     def _correct_input(_: t.Any):
